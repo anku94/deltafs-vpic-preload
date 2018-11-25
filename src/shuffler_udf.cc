@@ -3,9 +3,10 @@
 //
 
 #include "shuffler_udf.h"
+#include <cstdio>
 
 shuffler_udf ::shuffler_udf() {
-    printf("hello world\n")
+    printf("hello world\n");
 }
 
 shuffler_udf ::~shuffler_udf() {

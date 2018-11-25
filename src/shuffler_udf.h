@@ -9,7 +9,7 @@
 namespace {
     class shuffler_udf : udf_interface {
         shuffler_udf();
-        ~shuffler_udf()
+        ~shuffler_udf();
         void init();
         void process();
         void pause();
