@@ -47,6 +47,8 @@
 #include <set>
 #include <vector>
 
+class shuffler_udf; // forward declaration
+
 /*
  * preload context:
  *   - run-time state of the preload layer
@@ -128,6 +130,9 @@ typedef struct preload_ctx {
   int testin;    /* developer mode - for debug use only */
   int fake_data; /* replace vpic output with fake data - for debug only */
   int noscan;    /* do not probe sys info */
+
+  /* UDF state */
+  shuffler_udf *sh_udf;
 
   /* rank# less than this will get tapped */
   int pthread_tap;

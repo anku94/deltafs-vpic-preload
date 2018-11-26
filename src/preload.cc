@@ -47,6 +47,7 @@
 
 #include "preload_internal.h"
 #include "pthreadtap.h"
+#include "shuffler_udf.h"
 
 #ifdef PRELOAD_HAS_PAPI
 #include <papi.h>
@@ -193,6 +194,11 @@ static void preload_init() {
   pctx.recv_comm = MPI_COMM_NULL;
   pctx.recv_rank = -1;
   pctx.recv_sz = -1;
+
+
+  /* UDF initialization */
+  pctx.sh_udf = new shuffler_udf();
+
 
   /* obtain deltafs mount point */
   pctx.deltafs_mntp = maybe_getenv("PRELOAD_Deltafs_mntp");
@@ -950,35 +956,36 @@ int MPI_Init(int* argc, char*** argv) {
     pctx.recv_comm = MPI_COMM_WORLD;
 
     if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-      if (pctx.my_rank == 0) {
-        logf(LOG_INFO, "shuffle starting ... (rank 0)");
-        if (pctx.print_meminfo) {
-          print_meminfo();
-        }
-      }
-      shuffle_init(&pctx.sctx);
-      /* ensures all peers have the shuffle ready */
-      PRELOAD_Barrier(MPI_COMM_WORLD);
-      if (pctx.my_rank == 0) {
-        logf(LOG_INFO, "shuffle started (rank 0)");
-        if (pctx.print_meminfo) {
-          print_meminfo();
-        }
-      }
-      if (!shuffle_is_everyone_receiver(&pctx.sctx)) {
-        /* rank 0 must be a receiver */
-        if (pctx.my_rank == 0)
-          assert(shuffle_is_rank_receiver(&pctx.sctx, pctx.my_rank) != 0);
-        rv = MPI_Comm_split(
-            MPI_COMM_WORLD,
-            shuffle_is_rank_receiver(&pctx.sctx, pctx.my_rank) != 0
-                ? 1
-                : MPI_UNDEFINED,
-            pctx.my_rank, &pctx.recv_comm);
-        if (rv != MPI_SUCCESS) {
-          ABORT("MPI_Comm_split");
-        }
-      }
+      pctx.sh_udf->init(&pctx);
+      // if (pctx.my_rank == 0) {
+        // logf(LOG_INFO, "shuffle starting ... (rank 0)");
+        // if (pctx.print_meminfo) {
+          // print_meminfo();
+        // }
+      // }
+      // shuffle_init(&pctx.sctx);
+      // [> ensures all peers have the shuffle ready <]
+      // PRELOAD_Barrier(MPI_COMM_WORLD);
+      // if (pctx.my_rank == 0) {
+        // logf(LOG_INFO, "shuffle started (rank 0)");
+        // if (pctx.print_meminfo) {
+          // print_meminfo();
+        // }
+      // }
+      // if (!shuffle_is_everyone_receiver(&pctx.sctx)) {
+        // [> rank 0 must be a receiver <]
+        // if (pctx.my_rank == 0)
+          // assert(shuffle_is_rank_receiver(&pctx.sctx, pctx.my_rank) != 0);
+        // rv = MPI_Comm_split(
+            // MPI_COMM_WORLD,
+            // shuffle_is_rank_receiver(&pctx.sctx, pctx.my_rank) != 0
+                // ? 1
+                // : MPI_UNDEFINED,
+            // pctx.my_rank, &pctx.recv_comm);
+        // if (rv != MPI_SUCCESS) {
+          // ABORT("MPI_Comm_split");
+        // }
+      // }
     } else {
       if (pctx.my_rank == 0) {
         logf(LOG_WARN, "shuffle bypassed");
@@ -1194,7 +1201,8 @@ int MPI_Init(int* argc, char*** argv) {
         logf(LOG_INFO, "pausing background activities ... (rank 0)");
       }
       if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-        shuffle_pause(&pctx.sctx);
+        pctx.sh_udf->pause();
+        // shuffle_pause(&pctx.sctx);
       }
       if (pctx.plfstp != NULL) {
         deltafs_tp_pause(pctx.plfstp);
@@ -1301,7 +1309,8 @@ int MPI_Finalize(void) {
       deltafs_tp_rerun(pctx.plfstp);
     }
     if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-      shuffle_resume(&pctx.sctx);
+      pctx.sh_udf->resume();
+      // shuffle_resume(&pctx.sctx);
     }
     if (pctx.my_rank == 0) {
       logf(LOG_INFO, "resuming done (rank 0)");
@@ -1353,32 +1362,34 @@ int MPI_Finalize(void) {
 
   if (pctx.len_deltafs_mntp != 0 && pctx.len_plfsdir != 0) {
     if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-      if (pctx.my_rank == 0) {
-        logf(LOG_INFO, "shuffle shutting down ...");
-      }
-      /* ensures all peer messages are received */
-      PRELOAD_Barrier(MPI_COMM_WORLD);
-      /* shuffle flush */
-      if (pctx.my_rank == 0) {
-        flush_start = now_micros();
-        logf(LOG_INFO, "flushing shuffle ... (rank 0)");
-      }
-      shuffle_epoch_start(&pctx.sctx);
-      if (pctx.my_rank == 0) {
-        flush_end = now_micros();
-        logf(LOG_INFO, "flushing done %s",
-             pretty_dura(flush_end - flush_start).c_str());
-      }
+      pctx.sh_udf->finalize();
+      // if (pctx.my_rank == 0) {
+        // logf(LOG_INFO, "shuffle shutting down ...");
+      // }
+      // [> ensures all peer messages are received <]
+      // PRELOAD_Barrier(MPI_COMM_WORLD);
+      // [> shuffle flush <]
+      // if (pctx.my_rank == 0) {
+        // flush_start = now_micros();
+        // logf(LOG_INFO, "flushing shuffle ... (rank 0)");
+      // }
+      // shuffle_epoch_start(&pctx.sctx);
+      // if (pctx.my_rank == 0) {
+        // flush_end = now_micros();
+        // logf(LOG_INFO, "flushing done %s",
+             // pretty_dura(flush_end - flush_start).c_str());
+      // }
       /*
        * ensures everyone has the flushing done before finalizing so we can get
        * up-to-date and consistent shuffle stats
        */
-      PRELOAD_Barrier(MPI_COMM_WORLD);
-      shuffle_finalize(&pctx.sctx);
-      if (pctx.my_rank == 0) {
-        logf(LOG_INFO, "shuffle off");
-      }
-    }
+      // PRELOAD_Barrier(MPI_COMM_WORLD);
+      // shuffle_finalize(&pctx.sctx);
+      // if (pctx.my_rank == 0) {
+        // logf(LOG_INFO, "shuffle off");
+      // }
+    } // IS_BYPASS_SHUFFLE
+
 
     /* all writes are concluded, do the last flush, finish the directory,
      * retrieve final mon stats, and free the directory. note that the mon stats
@@ -1941,7 +1952,8 @@ DIR* opendir(const char* dir) {
       deltafs_tp_rerun(pctx.plfstp);
     }
     if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-      shuffle_resume(&pctx.sctx);
+      // shuffle_resume(&pctx.sctx);
+      pctx.sh_udf->resume();
     }
     if (pctx.my_rank == 0) {
       logf(LOG_INFO, "resuming done (rank 0)");
@@ -1960,18 +1972,19 @@ DIR* opendir(const char* dir) {
 
   /* flush the shuffle layer so all messages are delivered */
   if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-    if (num_eps != 0) {
-      if (pctx.my_rank == 0) {
-        flush_start = now_micros();
-        logf(LOG_INFO, "flushing shuffle receivers ... (rank 0)");
-      }
-      shuffle_epoch_start(&pctx.sctx);
-      if (pctx.my_rank == 0) {
-        flush_end = now_micros();
-        logf(LOG_INFO, "receiver flushing done %s",
-             pretty_dura(flush_end - flush_start).c_str());
-      }
-    }
+    pctx.sh_udf->epoch_start(num_eps);
+    // if (num_eps != 0) {
+      // if (pctx.my_rank == 0) {
+        // flush_start = now_micros();
+        // logf(LOG_INFO, "flushing shuffle receivers ... (rank 0)");
+      // }
+      // shuffle_epoch_start(&pctx.sctx);
+      // if (pctx.my_rank == 0) {
+        // flush_end = now_micros();
+        // logf(LOG_INFO, "receiver flushing done %s",
+             // pretty_dura(flush_end - flush_start).c_str());
+      // }
+    // }
   }
 
   /* epoch flush */
@@ -2119,16 +2132,17 @@ int closedir(DIR* dirp) {
 
   /* flush the rpc buffer and drain all on-going rpcs */
   if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-    if (pctx.my_rank == 0) {
-      flush_start = now_micros();
-      logf(LOG_INFO, "flushing shuffle senders ... (rank 0)");
-    }
-    shuffle_epoch_end(&pctx.sctx);
-    if (pctx.my_rank == 0) {
-      flush_end = now_micros();
-      logf(LOG_INFO, "sender flushing done %s",
-           pretty_dura(flush_end - flush_start).c_str());
-    }
+    pctx.sh_udf->epoch_end();
+    // if (pctx.my_rank == 0) {
+      // flush_start = now_micros();
+      // logf(LOG_INFO, "flushing shuffle senders ... (rank 0)");
+    // }
+    // shuffle_epoch_end(&pctx.sctx);
+    // if (pctx.my_rank == 0) {
+      // flush_end = now_micros();
+      // logf(LOG_INFO, "sender flushing done %s",
+           // pretty_dura(flush_end - flush_start).c_str());
+    // }
   }
 
   /* this ensures we have received all peer messages */
@@ -2136,16 +2150,17 @@ int closedir(DIR* dirp) {
       (!IS_BYPASS_SHUFFLE(pctx.mode) && pctx.bgpause)) {
     PRELOAD_Barrier(MPI_COMM_WORLD);
     if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-      if (pctx.my_rank == 0) {
-        flush_start = now_micros();
-        logf(LOG_INFO, "pre-flushing shuffle receivers ... (rank 0)");
-      }
-      shuffle_epoch_pre_start(&pctx.sctx);
-      if (pctx.my_rank == 0) {
-        flush_end = now_micros();
-        logf(LOG_INFO, "receiver pre-flushing done %s",
-             pretty_dura(flush_end - flush_start).c_str());
-      }
+      pctx.sh_udf->epoch_pre_start();
+      // if (pctx.my_rank == 0) {
+        // flush_start = now_micros();
+        // logf(LOG_INFO, "pre-flushing shuffle receivers ... (rank 0)");
+      // }
+      // shuffle_epoch_pre_start(&pctx.sctx);
+      // if (pctx.my_rank == 0) {
+        // flush_end = now_micros();
+        // logf(LOG_INFO, "receiver pre-flushing done %s",
+             // pretty_dura(flush_end - flush_start).c_str());
+      // }
     }
   }
 
@@ -2249,7 +2264,8 @@ int closedir(DIR* dirp) {
       logf(LOG_INFO, "pausing background activities ... (rank 0)");
     }
     if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-      shuffle_pause(&pctx.sctx);
+      pctx.sh_udf->pause();
+      // shuffle_pause(&pctx.sctx);
     }
     if (pctx.plfstp != NULL) {
       deltafs_tp_pause(pctx.plfstp);
@@ -2413,6 +2429,7 @@ int fclose(FILE* stream) {
 
   /* obtain filename length */
   fname_len = strlen(fname);
+  printf("name---> %s\n", fname);
 
   if (pctx.paranoid_checks) {
     if (pctx.particle_id_size != fname_len) {
@@ -2451,8 +2468,9 @@ int fclose(FILE* stream) {
   }
 
   if (!IS_BYPASS_SHUFFLE(pctx.mode)) {
-    rv = shuffle_write(&pctx.sctx, fname, fname_len, data, data_len,
-                       num_eps - 1);
+    rv = pctx.sh_udf->process(fname, fname_len, data, data_len, num_eps - 1);
+    // rv = shuffle_write(&pctx.sctx, fname, fname_len, data, data_len,
+                       // num_eps - 1);
     if (rv) {
       ABORT("plfsdir shuffler write failed");
     }
@@ -2647,6 +2665,7 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
   }
 
   pthread_mtx_lock(&write_mtx);
+  FILE *f = fopen("/users/ankushj/dfs-exp/scripts/log.txt", "a+");
 
   if (pctx.paranoid_checks) {
     if (fname_len != strlen(fname)) {
@@ -2661,6 +2680,7 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
   }
 
   if (pctx.sampling) {
+    fprintf(f, "sampling\n");
     assert(pctx.smap != NULL);
     if (num_eps == 1) {
       /* during the initial epoch, we accept as many names as possible */
@@ -2680,9 +2700,9 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
     rv = 0; /* noop */
 
   } else if (IS_BYPASS_DELTAFS_NAMESPACE(pctx.mode)) {
+    fprintf(f, "bypass dfs namespace\n");
     assert(pctx.plfshdl != NULL);
     n = deltafs_plfsdir_append(pctx.plfshdl, fname, epoch, data, data_len);
-
     if (n == data_len) {
       rv = 0;
     }
@@ -2703,7 +2723,9 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
     ABORT("not implemented");
   }
 
+  fclose(f);
   pthread_mtx_unlock(&write_mtx);
+
 
   return rv;
 }

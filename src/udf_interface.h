@@ -4,16 +4,14 @@
 
 #pragma once
 
-namespace {
-    class udf_interface {
-    public:
-        // udf_interface();
-        // virtual ~udf_interface();
-        virtual void init() = 0;
-        virtual void process() = 0;
-        virtual void pause() = 0;
-        virtual void resume() = 0;
-        virtual void finalize() = 0;
-    };
-}
+#include "preload_internal.h"
+
+class udf_interface {
+  public:
+    virtual void init(preload_ctx_t *pctx_arg) = 0;
+    virtual int process(const char* fname, unsigned char fname_len, char* data, unsigned char data_len, int epoch) = 0;
+    virtual int pause() = 0;
+    virtual int resume() = 0;
+    virtual void finalize() = 0;
+};
 
