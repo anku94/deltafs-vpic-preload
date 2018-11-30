@@ -2429,7 +2429,6 @@ int fclose(FILE* stream) {
 
   /* obtain filename length */
   fname_len = strlen(fname);
-  printf("name---> %s\n", fname);
 
   if (pctx.paranoid_checks) {
     if (pctx.particle_id_size != fname_len) {

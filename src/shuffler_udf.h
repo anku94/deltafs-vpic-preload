@@ -16,7 +16,6 @@ class shuffler_udf : udf_interface {
     ~shuffler_udf();
     void init(preload_ctx_t *pctx_arg);
     int process(const char* fname, unsigned char fname_len, char* data, unsigned char data_len, int epoch);
-
     int epoch_start(int num_eps);
     int epoch_end();
     int epoch_pre_start();
