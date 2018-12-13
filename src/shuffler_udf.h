@@ -11,6 +11,10 @@
 class shuffler_udf : udf_interface {
   private:
     preload_ctx_t *pctx;
+    double running_total;
+    double running_square;
+    long int running_num;
+    FILE *dump_file;
   public:
     shuffler_udf();
     ~shuffler_udf();

@@ -2572,7 +2572,7 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
   }
 
   pthread_mtx_lock(&write_mtx);
-  FILE *f = fopen("/users/ankushj/dfs-exp/scripts/log.txt", "a+");
+  // FILE *f = fopen("/users/ankushj/dfs-exp/scripts/log.txt", "a+");
 
   if (pctx.paranoid_checks) {
     if (fname_len != strlen(fname)) {
@@ -2587,7 +2587,7 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
   }
 
   if (pctx.sampling) {
-    fprintf(f, "sampling\n");
+    // fprintf(f, "sampling\n");
     assert(pctx.smap != NULL);
     if (num_eps == 1) {
       /* during the initial epoch, we accept as many names as possible */
@@ -2607,7 +2607,7 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
     rv = 0; /* noop */
 
   } else if (IS_BYPASS_DELTAFS_NAMESPACE(pctx.mode)) {
-    fprintf(f, "bypass dfs namespace\n");
+    // fprintf(f, "bypass dfs namespace\n");
     assert(pctx.plfshdl != NULL);
     n = deltafs_plfsdir_append(pctx.plfshdl, fname, epoch, data, data_len);
     if (n == data_len) {
@@ -2630,7 +2630,7 @@ int preload_write(const char* fname, unsigned char fname_len, char* data,
     ABORT("not implemented");
   }
 
-  fclose(f);
+  // fclose(f);
   pthread_mtx_unlock(&write_mtx);
 
 

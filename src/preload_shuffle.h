@@ -51,8 +51,24 @@
 #pragma once
 
 #include <stddef.h>
+#include <map>
+#include <string>
 
 typedef struct shuffle_ctx {
+  /* _sorted array_ of energy bins on the basis of which 
+   * shuffle_target should decide destination 
+   * by the way of a binary search
+   */
+  double *dest_bins;
+  /* has_bins - true if dest_bins is filled
+   * used to check if shuffle_write can proceed using dest_bins
+   * for shuffle_target computation
+   */
+  bool has_bins;
+  /* temporary buffer to store writes while nodes negotiate load balancing*/
+  // vector<string> temp_buffer;
+  std:: map<std::string, std::string> temp_buffer;
+
   /* internal shuffle impl */
   void* rep;
   /* consistent hash context */
@@ -156,6 +172,12 @@ void shuffle_pause(shuffle_ctx_t* ctx);
  * shuffle_resume: resume stopped background threads.
  */
 void shuffle_resume(shuffle_ctx_t* ctx);
+
+/*
+ * shuffle_target: shuffle data like shuffle_target, buf
+ * include shuffle data in the target computation
+ */
+int shuffle_data_target(shuffle_ctx_t* ctx, const char* buf, unsigned int buf_sz, const char* data_buf, unsigned int data_buf_sz);
 
 /*
  * shuffle_target: return the shuffle destination for a given req.

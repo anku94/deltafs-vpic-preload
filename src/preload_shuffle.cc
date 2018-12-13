@@ -45,6 +45,7 @@
 #include <pdlfs-common/xxhash.h>
 
 #include "common.h"
+#include "loadbalance_util.h"
 
 namespace {
 const char* shuffle_prepare_sm_uri(char* buf, const char* proto) {
@@ -317,6 +318,35 @@ void shuffle_epoch_end(shuffle_ctx_t* ctx) {
   }
 }
 
+int shuffle_data_target(shuffle_ctx_t* ctx, const char* buf, unsigned int buf_sz, const char* data_buf, unsigned int data_buf_sz) {
+  int world_sz;
+  unsigned long target;
+  int rv;
+
+  assert(ctx != NULL);
+  assert(buf_sz >= ctx->fname_len);
+
+  world_sz = shuffle_world_sz(ctx);
+
+  if (world_sz != 1) {
+    // if (IS_BYPASS_PLACEMENT(pctx.mode)) {
+      // rv = pdlfs::xxhash32(buf, ctx->fname_len, 0) % world_sz;
+    // } else {
+      // assert(ctx->chp != NULL);
+      // ch_placement_find_closest(
+          // ctx->chp, pdlfs::xxhash64(buf, ctx->fname_len, 0), 1, &target);
+      double energy = compute_energy(data_buf);
+      rv = binary_search(ctx->dest_bins, pctx.comm_sz, energy);
+      // printf("--> Moving particle %s with energy %lf to %d/%d\n", buf, energy, rv, rv & ctx->receiver_mask);
+      //rv = static_cast<int>(target);
+    // }
+  } else {
+    rv = shuffle_rank(ctx);
+  }
+
+  return (rv & ctx->receiver_mask);
+}
+
 int shuffle_target(shuffle_ctx_t* ctx, char* buf, unsigned int buf_sz) {
   int world_sz;
   unsigned long target;
@@ -381,6 +411,8 @@ int shuffle_write(shuffle_ctx_t* ctx, const char* fname,
   if (buf_sz != base_sz) memset(buf + base_sz, 0, buf_sz - base_sz);
 
   peer_rank = shuffle_target(ctx, buf, buf_sz);
+  // peer_rank = shuffle_data_target(ctx, fname, fname_len, data, data_len);
+
   rank = shuffle_rank(ctx);
 
   /* write trace if we are in testing mode */
@@ -590,6 +622,12 @@ void shuffle_finalize(shuffle_ctx_t* ctx) {
     }
 #undef NUM_RUSAGE
   }
+
+  if (ctx->dest_bins != NULL) {
+    // free(ctx->dest_bins);
+    ctx->dest_bins = NULL;
+  }
+
   if (ctx->chp != NULL) {
     ch_placement_finalize(ctx->chp);
     ctx->chp = NULL;
@@ -715,6 +753,10 @@ void shuffle_init(shuffle_ctx_t* ctx) {
       ABORT("ch_init");
     }
   }
+
+  /* allocate memory for bins */
+  printf("--> Allocate %d units of memory for bins\n", pctx.comm_sz);
+  ctx->dest_bins = (double *) malloc(sizeof(double)*pctx.comm_sz + 1);
 
   if (pctx.my_rank == 0) {
     if (!IS_BYPASS_PLACEMENT(pctx.mode)) {

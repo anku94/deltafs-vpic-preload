@@ -3,6 +3,7 @@
 //
 
 #include "shuffler_udf.h"
+#include "loadbalance_util.h"
 #include <cstdio>
 
 shuffler_udf ::shuffler_udf() {
@@ -50,7 +51,87 @@ void shuffler_udf ::init(preload_ctx_t *pctx_arg) {
 
 int shuffler_udf ::process(const char* fname, unsigned char fname_len, char* data, unsigned char data_len, int epoch) {
   assert(pctx);
-  int rv = shuffle_write(&pctx->sctx, fname, fname_len, data, data_len, epoch);
+  float f[10];
+  memcpy(f, data, 40);
+
+  double energy = compute_energy(f[5], f[6], f[7]);
+  this->running_total += energy;
+  this->running_square += (energy * energy);
+  this->running_num++;
+
+  int rv;
+  if (1 || pctx->sctx.has_bins) {
+    printf("--> safe shuffle write at rank %d\n", pctx->my_rank);
+    rv = shuffle_write(&pctx->sctx, fname, fname_len, data, data_len, epoch);
+  } else {
+    printf("--> writing %s to buffer, rank %d\n", fname, pctx->my_rank);
+    rv = buffer_write(&pctx->sctx, fname, fname_len, data, data_len, epoch);
+  }
+  // printf("------- particle %s -------\n", fname);
+  // printf("step*dt: %f\n", f[0]);
+  // printf("pdx: %f, dy: %f, dz: %f\n", f[1], f[2], f[3]);
+  // printf("id: %d\n", (int) f[4]);
+  // printf("pux: %f, uy: %f, uz: %f\n", f[5], f[6], f[7]);
+  // printf("charge: %d\n", (int) f[8]);
+  // printf("tag: %d\n", (long int) f[9]);
+  //fprintf(this->dump_file, "!!step: %f, name: %s, traj: %f %f %f, ener: %f %f %f\n", f[0], fname, f[1], f[2], f[3], f[5], f[6], f[7]);
+  fprintf(this->dump_file, "fname: %s, s: %f, e: %lf\n", fname, f[0], energy);
+
+  if (0 && this->running_num == 100) {
+    double all_total = 0;
+    double all_square = 0;
+    long int all_num = 0;
+    MPI_Reduce(const_cast<double *>(&this->running_total), 
+        &all_total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(const_cast<double *>(&this->running_square), 
+        &all_square, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(const_cast<long int *>(&this->running_num), 
+        &all_num, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    if (this->pctx->my_rank == 0) {
+      printf("---> Post Reduce at rank 0: %lf %lf %ld\n", all_total, all_square, all_num);
+    }
+
+    MPI_Bcast(&all_total, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&all_square, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&all_num, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    printf("---> Post Reduce at all: %lf %lf %ld\n", all_total, all_square, all_num);
+
+    double mu = all_total / all_num;
+    double sigma = (all_square / all_num) - (mu * mu);
+
+    printf("---> Distribution looks like: %lf %lf\n", mu, sigma);
+
+    // fill bins into pctx->sctx->dest_bins
+    int ret = gaussian_buckets(mu, sigma, pctx->sctx.dest_bins, pctx->comm_sz);
+    printf("---> Ret: %d\n", ret);
+
+    if (ret == 0) {
+      pctx->sctx.has_bins = true;
+    }
+
+    // flush map
+    int flush_count = 0;
+    for (auto it = pctx->sctx.temp_buffer.begin(); it != pctx->sctx.temp_buffer.end(); it++) {
+      std::string fname = it->first;
+      std::string fdata = it->second;
+      printf("--> processing %s %s at %d\n", it->first.c_str(), it->second.c_str(), pctx->my_rank);
+      int name_len = fname.length();
+      int data_len = fdata.length();
+      // assume same epoch
+      char fdata_str[255];
+      strncpy(fdata_str, fdata.c_str(), data_len);
+      rv &= shuffle_write(&pctx->sctx, fname.c_str(), name_len, fdata_str, data_len, epoch);
+      flush_count++;
+    }
+
+    printf("--> rank %d, epoch: %d, flush_count: %d\n", pctx->my_rank, epoch, flush_count);
+
+    pctx->sctx.temp_buffer.clear();
+
+  }
+
   return rv;
 }
 
@@ -101,6 +182,11 @@ void shuffler_udf ::finalize() {
 }
 
 int shuffler_udf ::epoch_end() {
+  fclose(this->dump_file);
+
+  printf("Running numbers: total: %lf, square: %lf, num: %ld\n",
+      this->running_total, this->running_square, this->running_num);
+
   uint64_t flush_start;
   uint64_t flush_end;
 
@@ -137,6 +223,18 @@ int shuffler_udf ::epoch_pre_start() {
 }
 
 int shuffler_udf ::epoch_start(int num_eps) {
+  char final_path[256];
+  const char *home_dir = "/users/ankushj";
+  snprintf(final_path, 256, "%s/%s/%s.%d.%d", home_dir, "all_dumps", "dump", this->pctx->my_rank, num_eps);
+  printf("Dumping particle data to: %s\n", final_path);
+  this->dump_file = fopen(final_path, "w+");
+  assert(this->dump_file);
+
+  this->running_total = 0;
+  this->running_square = 0;
+  this->running_num = 0;
+  pctx->sctx.has_bins = false;
+
   uint64_t flush_start;
   uint64_t flush_end;
 
