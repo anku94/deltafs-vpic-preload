@@ -13,7 +13,18 @@ class shuffler_udf : udf_interface {
     preload_ctx_t *pctx;
     double running_total;
     double running_square;
+
+    // double running_px;
+    // double running_px2;
+
+    // double running_py;
+    // double running_py2;
+
+    // double running_pz;
+    // double running_pz2;
+
     long int running_num;
+
     FILE *dump_file;
   public:
     shuffler_udf();

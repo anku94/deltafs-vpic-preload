@@ -158,3 +158,37 @@ int binary_search(double *buckets, int n, double energy) {
   return -1;
 }
 
+int get_buckets(double px, double px2, double py, double py2,
+    double pz, double pz2, double *buckets, long int n, int nproc) {
+  printf("---> Computing gaussian buckets: nproc: %d, nelem: %ld\n", nproc, n);
+  // get buckets from px/px2
+  double xmu = px/n;
+  double xsig = px2/n - (xmu*xmu);
+  double xbuckets[nproc + 10];
+  gaussian_buckets(xmu, xsig, xbuckets, nproc);
+
+  // get buckets from py/py2
+  double ymu = py/n;
+  double ysig = py2/n - (ymu*ymu);
+  double ybuckets[nproc + 10];
+  gaussian_buckets(ymu, ysig, ybuckets, nproc);
+
+  // get buckets from pz/pz2
+  double zmu = pz/n;
+  double zsig = pz2/n - (zmu*zmu);
+  double zbuckets[nproc + 10];
+  gaussian_buckets(zmu, zsig, zbuckets, nproc);
+
+  // combine the 3 into arg:buckets
+  buckets[0] = xbuckets[0]; // -inf
+  buckets[nproc] = xbuckets[nproc]; // +inf
+
+  for (int i = 1; i < nproc; i++) {
+    buckets[i] = compute_energy(xbuckets[i], ybuckets[i], zbuckets[i]);
+    printf("--> get_buckets: %lf: %lf %lf %lf\n", buckets[i],
+        xbuckets[i], ybuckets[i], zbuckets[i]);
+  }
+
+  return 0;
+}
+

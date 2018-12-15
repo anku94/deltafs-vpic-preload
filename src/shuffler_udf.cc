@@ -5,6 +5,7 @@
 #include "shuffler_udf.h"
 #include "loadbalance_util.h"
 #include <cstdio>
+#include <cmath>
 
 shuffler_udf ::shuffler_udf() {
   pctx = NULL;
@@ -57,14 +58,24 @@ int shuffler_udf ::process(const char* fname, unsigned char fname_len, char* dat
   double energy = compute_energy(f[5], f[6], f[7]);
   this->running_total += energy;
   this->running_square += (energy * energy);
+
   this->running_num++;
 
+  // this->running_px += f[5];
+  // this->running_px2 += (f[5] * f[5]);
+
+  // this->running_py += f[6];
+  // this->running_py2 += (f[6] * f[6]);
+
+  // this->running_pz += f[7];
+  // this->running_pz2 += (f[7] * f[7]);
+
   int rv;
-  if (1 || pctx->sctx.has_bins) {
-    printf("--> safe shuffle write at rank %d\n", pctx->my_rank);
+  if (pctx->sctx.has_bins) {
+    // printf("--> safe shuffle write at rank %d\n", pctx->my_rank);
     rv = shuffle_write(&pctx->sctx, fname, fname_len, data, data_len, epoch);
   } else {
-    printf("--> writing %s to buffer, rank %d\n", fname, pctx->my_rank);
+    // printf("--> writing %s to buffer, rank %d\n", fname, pctx->my_rank);
     rv = buffer_write(&pctx->sctx, fname, fname_len, data, data_len, epoch);
   }
   // printf("------- particle %s -------\n", fname);
@@ -77,14 +88,40 @@ int shuffler_udf ::process(const char* fname, unsigned char fname_len, char* dat
   //fprintf(this->dump_file, "!!step: %f, name: %s, traj: %f %f %f, ener: %f %f %f\n", f[0], fname, f[1], f[2], f[3], f[5], f[6], f[7]);
   fprintf(this->dump_file, "fname: %s, s: %f, e: %lf\n", fname, f[0], energy);
 
-  if (0 && this->running_num == 100) {
+  if (this->running_num == 500) {
     double all_total = 0;
     double all_square = 0;
+
+    // double all_px = 0;
+    // double all_px2 = 0;
+
+    // double all_py = 0;
+    // double all_py2 = 0;
+
+    // double all_pz = 0;
+    // double all_pz2 = 0;
+
     long int all_num = 0;
     MPI_Reduce(const_cast<double *>(&this->running_total), 
         &all_total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
     MPI_Reduce(const_cast<double *>(&this->running_square), 
         &all_square, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    // MPI_Reduce(const_cast<double *>(&this->running_px), 
+        // &all_px, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    // MPI_Reduce(const_cast<double *>(&this->running_px2), 
+        // &all_px2, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    // MPI_Reduce(const_cast<double *>(&this->running_py), 
+        // &all_py, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    // MPI_Reduce(const_cast<double *>(&this->running_py2), 
+        // &all_py2, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    // MPI_Reduce(const_cast<double *>(&this->running_pz), 
+        // &all_pz, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    // MPI_Reduce(const_cast<double *>(&this->running_pz2), 
+        // &all_pz2, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
     MPI_Reduce(const_cast<long int *>(&this->running_num), 
         &all_num, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
@@ -94,29 +131,55 @@ int shuffler_udf ::process(const char* fname, unsigned char fname_len, char* dat
 
     MPI_Bcast(&all_total, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     MPI_Bcast(&all_square, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    // MPI_Bcast(&all_px, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    // MPI_Bcast(&all_px2, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    // MPI_Bcast(&all_py, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    // MPI_Bcast(&all_py2, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    // MPI_Bcast(&all_pz, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    // MPI_Bcast(&all_pz2, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
     MPI_Bcast(&all_num, 1, MPI_LONG, 0, MPI_COMM_WORLD);
 
     printf("---> Post Reduce at all: %lf %lf %ld\n", all_total, all_square, all_num);
+    // printf("---> Px px2: %lf %lf\n", all_px, all_px2);
+    // printf("---> Py py2: %lf %lf\n", all_py, all_py2);
+    // printf("---> Pz pz2: %lf %lf\n", all_pz, all_pz2);
 
     double mu = all_total / all_num;
-    double sigma = (all_square / all_num) - (mu * mu);
+    double sigma2 = (all_square / all_num) - (mu * mu);
+    double sigma = sqrt(sigma2);
 
-    printf("---> Distribution looks like: %lf %lf\n", mu, sigma);
+    // printf("---> Distribution looks like: %lf %lf\n", mu, sigma);
 
     // fill bins into pctx->sctx->dest_bins
     int ret = gaussian_buckets(mu, sigma, pctx->sctx.dest_bins, pctx->comm_sz);
+    // int ret = get_buckets(all_px, all_px2, all_py, all_py2, all_pz, all_pz2,
+        // pctx->sctx.dest_bins, all_num, pctx->comm_sz);
+
+    if (pctx->my_rank == 0) {
+      printf("--> bucket distrib: ");
+      for(int gidx = 0; gidx <= pctx->comm_sz; gidx++) {
+        printf("%lf ", pctx->sctx.dest_bins[gidx]);
+      }
+      printf("\n");
+    }
+
     printf("---> Ret: %d\n", ret);
 
-    if (ret == 0) {
+    assert(ret == 0);
+    // if (ret == 0) {
       pctx->sctx.has_bins = true;
-    }
+    // }
 
     // flush map
     int flush_count = 0;
     for (auto it = pctx->sctx.temp_buffer.begin(); it != pctx->sctx.temp_buffer.end(); it++) {
       std::string fname = it->first;
       std::string fdata = it->second;
-      printf("--> processing %s %s at %d\n", it->first.c_str(), it->second.c_str(), pctx->my_rank);
+      // printf("--> processing %s %s at %d\n", it->first.c_str(), it->second.c_str(), pctx->my_rank);
       int name_len = fname.length();
       int data_len = fdata.length();
       // assume same epoch
@@ -233,6 +296,16 @@ int shuffler_udf ::epoch_start(int num_eps) {
   this->running_total = 0;
   this->running_square = 0;
   this->running_num = 0;
+
+  // this->running_px = 0;
+  // this->running_px2 = 0;
+
+  // this->running_py = 0;
+  // this->running_py2 = 0;
+
+  // this->running_pz = 0;
+  // this->running_pz2 = 0;
+
   pctx->sctx.has_bins = false;
 
   uint64_t flush_start;

@@ -337,6 +337,9 @@ int shuffle_data_target(shuffle_ctx_t* ctx, const char* buf, unsigned int buf_sz
           // ctx->chp, pdlfs::xxhash64(buf, ctx->fname_len, 0), 1, &target);
       double energy = compute_energy(data_buf);
       rv = binary_search(ctx->dest_bins, pctx.comm_sz, energy);
+      if (rv < 0) {
+        printf("-----------> PROBLEM PROBLEM SHUFFLE_TARGET -1 PROBLEM <-------\n");
+      }
       // printf("--> Moving particle %s with energy %lf to %d/%d\n", buf, energy, rv, rv & ctx->receiver_mask);
       //rv = static_cast<int>(target);
     // }
@@ -410,8 +413,8 @@ int shuffle_write(shuffle_ctx_t* ctx, const char* fname,
   memcpy(buf + fname_len + 1, data, data_len);
   if (buf_sz != base_sz) memset(buf + base_sz, 0, buf_sz - base_sz);
 
-  peer_rank = shuffle_target(ctx, buf, buf_sz);
-  // peer_rank = shuffle_data_target(ctx, fname, fname_len, data, data_len);
+  // peer_rank = shuffle_target(ctx, buf, buf_sz);
+  peer_rank = shuffle_data_target(ctx, fname, fname_len, data, data_len);
 
   rank = shuffle_rank(ctx);
 
