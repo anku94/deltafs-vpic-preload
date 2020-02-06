@@ -521,9 +521,25 @@ void sigusr1(int foo) {
 void send_all_to_all(shuffle_ctx_t* ctx, char* buf, uint32_t buf_sz,
                      int my_rank, int comm_sz, bool send_to_self);
 
+void mock_reneg() {
+  range_ctx_t* rctx = &pctx.rctx;
+
+  range_init_negotiation(&pctx);
+
+  std::unique_lock<std::mutex> bin_access_ul(rctx->bin_access_m);
+
+  rctx->block_writes_cv.wait(bin_access_ul, [] {
+    /* having a condition ensures we ignore spurious wakes */
+    return (pctx.rctx.range_state == range_state_t::RS_READY);
+  });
+}
+
 int shuffle_write(shuffle_ctx_t* ctx, const char* fname,
                   unsigned char fname_len, char* data, unsigned char data_len,
                   int epoch) {
+  mock_reneg();
+  return 0;
+
   char buf[255];
   int peer_rank = -1;
   int rank;
@@ -936,6 +952,13 @@ unsigned char TOUCHAR(int input) {
 }
 }  // namespace
 
+void shuffle_sighandle(int num) {
+  fprintf(stderr, "Received SIGUSR at Rank %d\n", pctx.my_rank);
+  xn_ctx_t* xctx = static_cast<xn_ctx_t*>(pctx.sctx.rep);
+  shuffle_statedump(xctx->psh, 0);
+  range_dump_state(num);
+}
+
 void shuffle_init(shuffle_ctx_t* ctx) {
   const char* proto;
   const char* env;
@@ -1093,6 +1116,8 @@ void shuffle_init(shuffle_ctx_t* ctx) {
 #endif
     fputc('\n', stderr);
   }
+
+  signal(SIGUSR1, shuffle_sighandle);
 }
 
 int shuffle_is_everyone_receiver(shuffle_ctx_t* ctx) {

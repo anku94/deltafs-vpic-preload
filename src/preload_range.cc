@@ -12,6 +12,8 @@
 #define RANGE_DEBUG_T 1
 #define RANGE_PARANOID_CHECKS 1
 
+#define IS_RZERO (pctx.my_rank == 0)
+
 extern const int num_eps;
 
 /* Forward declarations */
@@ -26,11 +28,37 @@ void range_collect_and_send_pivots(range_ctx_t *rctx, shuffle_ctx_t *sctx);
 
 void recalculate_local_bins();
 
+void increment_rnum_and_send_acks();
+
 #define PRINTBUF_LEN 16384
 
 char rs_pb_buf[16384];
 char rs_pb_buf2[16384];
 char rs_pbin_buf[16384];
+
+char *print_state(range_state_t state);
+
+void range_dump_state(int num) {
+  int rank = pctx.my_rank;
+  char fname[64];
+  snprintf(fname, 64, "range%d.txt", rank);
+  FILE *f = fopen(fname, "a+");
+  fwrite("BEGIN\n", 6, 1, f);
+
+  char buffer[2048];
+  int sz;
+
+  print_state(pctx.rctx.range_state);
+  sz = snprintf(buffer, 2048, "%s\n", rs_pb_buf);
+  fwrite(buffer, sz, 1, f);
+  
+  sz = snprintf(buffer, 2048, "Ack Rno: %d, Rno: %d\n",
+      pctx.rctx.ack_round_num.load(), pctx.rctx.pvt_round_num.load());
+  fwrite(buffer, sz, 1, f);
+
+  fwrite("FINIS\n", 6, 1, f);
+  fclose(f);
+}
 
 char *print_state(range_state_t state) {
   switch (state) {
@@ -250,7 +278,7 @@ void range_handle_reneg_pivots(char *buf, unsigned int buf_sz, int src_rank) {
     }
 
 #ifdef RANGE_DEBUG_T
-    logf(LOG_INFO,
+    logf(LOG_DBUG,
          "RENEG_PVT Rank %d from %d: "
          "Pivots: %.1f, %.1f, %.1f, %.1f\n",
          pctx.my_rank, src_rank, pivots[0], pivots[1], pivots[2], pivots[3]);
@@ -296,7 +324,8 @@ void range_handle_reneg_pivots(char *buf, unsigned int buf_sz, int src_rank) {
     logf(LOG_INFO, "Rank %d ready to update its bins\n", pctx.my_rank);
 #endif
 
-    recalculate_local_bins();
+    // recalculate_local_bins();
+    increment_rnum_and_send_acks();
   }
 }
 
@@ -365,13 +394,21 @@ void recalculate_local_bins() {
     pctx.rctx.range_max = rbvec[rbvec.size() - 1u].bin_val;
 
     printf("%s\n", print_pivots(&pctx, &(pctx.rctx)));
+  } /* lock guard scope end */
+}
 
+void increment_rnum_and_send_acks() {
+  { /* lock guard scope begin */
+    std::lock_guard<std::mutex> balg(pctx.rctx.bin_access_m);
     pctx.rctx.pvt_round_num++;
     pctx.rctx.range_state_prev = pctx.rctx.range_state;
     pctx.rctx.range_state = range_state_t::RS_ACK;
   } /* lock guard scope end */
 
-  logf(LOG_INFO, "Rank %d updated its bins. Sending acks now\n", pctx.my_rank);
+  if (pctx.my_rank == 0) {
+    logf(LOG_INFO, "Rank %d updated its bins. Sending acks now\n", pctx.my_rank);
+  }
+
   assert(pctx.rctx.range_state != range_state_t::RS_READY);
   send_all_acks();
 }
@@ -500,6 +537,10 @@ void range_handle_reneg_acks(char *buf, unsigned int buf_sz) {
 
   /* All ACKs have been received */
   if (pctx.rctx.ranks_acked_count == pctx.comm_sz) {
+
+    logf(LOG_INFO, "Received %d acks at Rank %d (%d/%d)\n",
+        pctx.comm_sz, pctx.my_rank, pctx.rctx.ack_round_num.load(),
+        pctx.rctx.pvt_round_num.load());
 
     /* Transfer pre-ACKs for R+1 to cur-ACK array */
     std::copy(pctx.rctx.ranks_acked_next.begin(),

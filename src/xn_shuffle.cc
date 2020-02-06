@@ -36,6 +36,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 
+#include <signal.h>
 #include "common.h"
 #include "nn_shuffler.h"
 #include "nn_shuffler_internal.h"
@@ -73,7 +74,7 @@ void xn_shuffle_epoch_end(xn_ctx_t* ctx) {
 
   // hret = shuffle_flush_originqs(ctx->psh);
   // if (hret != HG_SUCCESS) {
-    // RPC_FAILED("fail to flush local priority origin queues", hret);
+  // RPC_FAILED("fail to flush local priority origin queues", hret);
   // }
 
   xn_local_barrier(ctx);
@@ -84,7 +85,7 @@ void xn_shuffle_epoch_end(xn_ctx_t* ctx) {
 
   // hret = shuffle_flush_remoteqs(ctx->psh);
   // if (hret != HG_SUCCESS) {
-    // RPC_FAILED("fail to flush remote priority queues", hret);
+  // RPC_FAILED("fail to flush remote priority queues", hret);
   // }
 }
 
@@ -108,7 +109,7 @@ void xn_shuffle_epoch_start(xn_ctx_t* ctx) {
 
   // hret = shuffle_flush_relayqs(ctx->psh);
   // if (hret != HG_SUCCESS) {
-    // RPC_FAILED("fail to flush local priorty relay queues", hret);
+  // RPC_FAILED("fail to flush local priorty relay queues", hret);
   // }
 
   xn_local_barrier(ctx);
@@ -124,7 +125,7 @@ void xn_shuffle_epoch_start(xn_ctx_t* ctx) {
 
   // hret = shuffle_flush_delivery(ctx->psh);
   // if (hret != HG_SUCCESS) {
-    // RPC_FAILED("fail to flush priority delivery", hret);
+  // RPC_FAILED("fail to flush priority delivery", hret);
   // }
 }
 
@@ -151,7 +152,7 @@ void xn_shuffle_enqueue(xn_ctx_t* ctx, void* buf, unsigned char buf_sz,
 }
 
 void xn_shuffle_priority_send(xn_ctx_t* ctx, void* buf, unsigned char buf_sz,
-                               int epoch, int dst, int src) {
+                              int epoch, int dst, int src) {
   hg_return_t hret;
   assert(ctx->psh != NULL);
   hret = shuffle_enqueue(ctx->psh, dst, 0, buf, buf_sz);
@@ -162,9 +163,9 @@ void xn_shuffle_priority_send(xn_ctx_t* ctx, void* buf, unsigned char buf_sz,
 }
 
 void xn_shuffle_init(xn_ctx_t* ctx) {
-  hg_class_t *hgcls;
-  hg_context_t *hgctx;
-  struct shuffle_opts so;
+  hg_class_t* hgcls;
+  hg_context_t* hgctx;
+  struct shuffle_opts so, pso;
   const char* logfile;
   const char* env;
   char uri[100];
@@ -173,7 +174,7 @@ void xn_shuffle_init(xn_ctx_t* ctx) {
   assert(ctx != NULL);
 
   shuffle_opts_init(&so);
-  shuffle_prepare_uri(uri);     /* uri is an 'out', XXX: uri fixed sized */
+  shuffle_prepare_uri(uri); /* uri is an 'out', XXX: uri fixed sized */
   hgcls = HG_Init(uri, HG_TRUE);
   if (!hgcls) {
     ABORT("xn_shuffle_init:HG_Init net");
@@ -186,19 +187,17 @@ void xn_shuffle_init(xn_ctx_t* ctx) {
   if (!ctx->nethand) {
     ABORT("xn_shuffle_init:progressor_init net");
   }
-  ctx->localhand = NULL;    /* NULL means create a new na+sm */
+  ctx->localhand = NULL; /* NULL means create a new na+sm */
 
   /*
    * these NEXUS vars migrated here when we added progressor, but
    * we keep the name for backward compat.
    */
   if (is_envset("NEXUS_BYPASS_LOCAL")) {
-
     /* use remote for all local comm. */
     ctx->localhand = ctx->nethand;
 
   } else if ((env = maybe_getenv("NEXUS_ALT_LOCAL")) != NULL) {
-
     /* use an alternate local mercury */
     hgcls = HG_Init(env, HG_TRUE);
     if (!hgcls) {
@@ -331,24 +330,10 @@ void xn_shuffle_init(xn_ctx_t* ctx) {
     shuffle_cfglog(DEF_CFGLOG_ARGS(logfile));
   }
 
-  ctx->sh = shuffle_init(ctx->nx, const_cast<char*>("shuffle_rpc_write"),
-                          xn_shuffle_deliver, &so);
-
-  if (ctx->sh == NULL) {
-    ABORT("shuffler_init");
-  } else if (pctx.my_rank == 0) {
-    logf(LOG_INFO,
-         "3-HOP confs: sndlim(l/r)=%d/%d, maxrpc(lo/lr/r)=%d/%d/%d, "
-         "buftgt(lo/lr/r)=%d/%d/%d, dq(min/max)=%d/%d",
-         so.localsenderlimit, so.remotesenderlimit, so.lomaxrpc, so.lrmaxrpc,
-         so.rmaxrpc, so.lobuftarget, so.lrbuftarget, so.rbuftarget,
-         so.deliverq_threshold, so.deliverq_max);
-    if (logfile != NULL && logfile[0] != 0 && strcmp(logfile, "/") != 0) {
-      fputs(">>> LOGGING is ON, will log to ...\n --> ", stderr);
-      fputs(logfile, stderr);
-      fprintf(stderr, ".[0-%d]\n", pctx.comm_sz);
-    }
-  }
+  pso = so;
+  pso.lobuftarget = 1;
+  pso.lrbuftarget = 1;
+  pso.rbuftarget = 1;
 
   /*
    * Priority shuffler has identical arguments, except it does not batch RPCs
@@ -358,12 +343,8 @@ void xn_shuffle_init(xn_ctx_t* ctx) {
    * Last argument is false to direct psh to not start network threads
    */
 
-  so.lobuftarget = 1;
-  so.lrbuftarget = 1;
-  so.rbuftarget = 1;
-
   ctx->psh = shuffle_init(ctx->nx, const_cast<char*>("shuffle_rpc_priority"),
-                           xn_shuffle_deliver, &so);
+                          xn_shuffle_deliver, &pso);
 
   if (ctx->psh == NULL) {
     ABORT("priority_shuffler_init");
@@ -371,6 +352,25 @@ void xn_shuffle_init(xn_ctx_t* ctx) {
     logf(LOG_INFO,
          "PRIORITY 3-HOP active; confs: sndlim(l/r)=%d/%d, "
          "maxrpc(lo/lr/r)=%d/%d/%d, "
+         "buftgt(lo/lr/r)=%d/%d/%d, dq(min/max)=%d/%d",
+         pso.localsenderlimit, pso.remotesenderlimit, pso.lomaxrpc, pso.lrmaxrpc,
+         pso.rmaxrpc, pso.lobuftarget, pso.lrbuftarget, pso.rbuftarget,
+         pso.deliverq_threshold, pso.deliverq_max);
+    if (logfile != NULL && logfile[0] != 0 && strcmp(logfile, "/") != 0) {
+      fputs(">>> LOGGING is ON, will log to ...\n --> ", stderr);
+      fputs(logfile, stderr);
+      fprintf(stderr, ".[0-%d]\n", pctx.comm_sz);
+    }
+  }
+
+  ctx->sh = shuffle_init(ctx->nx, const_cast<char*>("shuffle_rpc_write"),
+                         xn_shuffle_deliver, &so);
+
+  if (ctx->sh == NULL) {
+    ABORT("shuffler_init");
+  } else if (pctx.my_rank == 0) {
+    logf(LOG_INFO,
+         "3-HOP confs: sndlim(l/r)=%d/%d, maxrpc(lo/lr/r)=%d/%d/%d, "
          "buftgt(lo/lr/r)=%d/%d/%d, dq(min/max)=%d/%d",
          so.localsenderlimit, so.remotesenderlimit, so.lomaxrpc, so.lrmaxrpc,
          so.rmaxrpc, so.lobuftarget, so.lrbuftarget, so.rbuftarget,
@@ -416,7 +416,7 @@ void xn_shuffle_destroy(xn_ctx_t* ctx) {
       shuffle_send_stats(ctx->sh, &tmpori, &tmprl, &ctx->stat.remote.sends);
       ctx->stat.local.sends = tmpori + tmprl;
       shuffle_recv_stats(ctx->sh, &ctx->stat.local.recvs,
-                          &ctx->stat.remote.recvs);
+                         &ctx->stat.remote.recvs);
 #endif
       shuffle_shutdown(ctx->sh);
       ctx->sh = NULL;
