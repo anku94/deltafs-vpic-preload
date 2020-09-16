@@ -1,12 +1,16 @@
 #
 # test programs
 #
-set (tests range_utils)
+set (tests range_utils_test.cc)
 
-foreach (tst ${tests})
+foreach (lcv ${tests})
 
-    add_executable (${tst}-test ${tst}-test.cc)
-    target_link_libraries (${tst}-test deltafs-common deltafs-preload)
-    add_test(${tst}-test ${tst}-test)
+    # use basename as test name
+    get_filename_component (id ${lcv} NAME_WE)
+
+    add_executable ("preload_${id}" ${lcv})
+    target_link_libraries ("preload_${id}" deltafs-preload)
+    add_test("preload_${id}" "preload_${id}")
+    add_dependencies (pdl-build-tests "preload_${id}")
 
 endforeach ()
