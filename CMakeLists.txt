@@ -26,10 +26,6 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
         "${CMAKE_CURRENT_SOURCE_DIR}/src/cmake")
 
-# add pdlfs-common cmake module directory to the path
-set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../deltafs-prefix/src/deltafs/external/pdlfs-common/cmake")
-
 # pull in pdlfs handling of generic cmake config
 include (cmake-options)
 

@@ -8,9 +8,9 @@ foreach (lcv ${tests})
     # use basename as test name
     get_filename_component (id ${lcv} NAME_WE)
 
-    add_executable ("preload_${id}" ${lcv})
-    target_link_libraries ("preload_${id}" deltafs-preload)
-    add_test("preload_${id}" "preload_${id}")
-    add_dependencies (pdl-build-tests "preload_${id}")
+    add_executable (${id} ${lcv})
+    target_link_libraries (${id} deltafs-preload)
+    add_test(${id} ${id})
+    add_dependencies (pdl-build-tests ${id})
 
 endforeach ()
