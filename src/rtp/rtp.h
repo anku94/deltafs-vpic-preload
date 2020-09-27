@@ -3,6 +3,7 @@
 #include <time.h>
 
 #include "data_buffer.h"
+#include "pdlfs-common/mutexlock.h"
 #include "preload_range.h"
 #include "preload_shuffle.h"
 #include "range_utils.h"
@@ -70,7 +71,7 @@ struct rtp_ctx {
    * shared between the main thread and multiple message handlers.
    * Message handlers will be serialized by the delivery thread
    * so concurrency there is not an issue */
-  pthread_mutex_t reneg_mutex = PTHREAD_MUTEX_INITIALIZER;
+  port::Mutex reneg_mutex;
 
   RtpStateMgr state_mgr;
   DataBuffer* data_buffer = nullptr;

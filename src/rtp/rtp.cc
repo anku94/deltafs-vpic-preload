@@ -168,7 +168,7 @@ int rtp_init(rtp_ctx_t rctx, shuffle_ctx_t* sctx, pivot_ctx_t* pvt_ctx,
   xn_ctx_t* xn_sctx = NULL;
   int rv = 0;
 
-  pthread_mutex_lock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Lock();
 
   if (rctx->state_mgr.get_state() != RenegState::INIT) {
     logf(LOG_DBUG, "rtp_init: can initialize only in init stage\n");
@@ -227,7 +227,7 @@ int rtp_init(rtp_ctx_t rctx, shuffle_ctx_t* sctx, pivot_ctx_t* pvt_ctx,
   perfstats_printf(&(pctx.perf_ctx), "RENEG_RTP_READY");
 
 cleanup:
-  pthread_mutex_unlock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Unlock();
   return rv;
 }
 
@@ -301,7 +301,7 @@ int rtp_init_round(rtp_ctx_t rctx) {
 
   /* ALWAYS BLOCK MAIN THREAD MUTEX FIRST */
   /* Assert pivot_access_m.lockheld() */
-  pthread_mutex_lock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Lock();
 
   if (rctx->state_mgr.get_state() == RenegState::READY) {
     perfstats_printf(&(pctx.perf_ctx), "RENEG_RTP_BCAST_BEGIN");
@@ -309,7 +309,7 @@ int rtp_init_round(rtp_ctx_t rctx) {
     rctx->state_mgr.update_state(RenegState::READYBLOCK);
   }
 
-  pthread_mutex_unlock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Unlock();
 
   while (rctx->state_mgr.get_state() != RenegState::READY) {
     pthread_cond_wait(&(pvt_ctx->pivot_update_cv), &(pvt_ctx->pivot_access_m));
@@ -378,7 +378,7 @@ int rtp_handle_rtp_begin(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
   bool activated_now = false;
 
   pthread_mutex_lock(&(rctx->pvt_ctx->pivot_access_m));
-  pthread_mutex_lock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Lock();
 
   if (round_num < rctx->round_num) {
     logf(LOG_DBG2,
@@ -400,7 +400,7 @@ int rtp_handle_rtp_begin(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
     ABORT("rtp_handle_rtp_begin: unexpected round_num recvd");
   }
 
-  pthread_mutex_unlock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Unlock();
   pthread_mutex_unlock(&(rctx->pvt_ctx->pivot_access_m));
 
   if (activated_now) {
@@ -499,7 +499,7 @@ int rtp_handle_reneg_pivot(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
          pivots[0], pivots[1], pivots[2], pivots[3]);
   }
 
-  pthread_mutex_lock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Lock();
 
   int stage_pivot_count = 0;
 
@@ -520,7 +520,7 @@ int rtp_handle_reneg_pivot(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
     stage_pivot_count = rctx->data_buffer->store_data(
         stage_num, pivots, num_pivots, pivot_width, /*isnextround */ false);
   }
-  pthread_mutex_unlock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Unlock();
 
   logf(LOG_INFO,
        "rtp_handle_reneg_pivot: S%d at Rank %d, item from %d. Total: %d\n",
@@ -587,7 +587,7 @@ int rtp_handle_pivot_bcast(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
    * the update and then move to READY
    */
 
-  pthread_mutex_lock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Lock();
 
   RenegState rstate = rctx->state_mgr.get_state();
 
@@ -595,7 +595,7 @@ int rtp_handle_pivot_bcast(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
     ABORT("rtp_handle_pivot_bcast: unexpected pivot bcast");
   }
 
-  pthread_mutex_unlock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Unlock();
 
   /* send_to_all here excludes self; sinne we're passing my_rank to exclude */
   if (rctx->my_rank == rctx->root[3]) {
@@ -636,7 +636,7 @@ int rtp_handle_pivot_bcast(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
    * If not, mark self as READY, and wake up Main Thread
    */
   pthread_mutex_lock(&(pvt_ctx->pivot_access_m));
-  pthread_mutex_lock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Lock();
 
   perfstats_log_reneg(&(pctx.perf_ctx), pvt_ctx, rctx);
 
@@ -659,7 +659,7 @@ int rtp_handle_pivot_bcast(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
     pvt_ctx->mts_mgr.update_state(MainThreadState::MT_READY);
   }
 
-  pthread_mutex_unlock(&(rctx->reneg_mutex));
+  rctx->reneg_mutex.Unlock();
 
   if (!replay_rtp_begin_flag) {
     /* Since no round to replay, wake up Main Thread */
