@@ -301,6 +301,7 @@ int rtp_init_round(rtp_ctx_t rctx) {
 
   /* ALWAYS BLOCK MAIN THREAD MUTEX FIRST */
   /* Assert pivot_access_m.lockheld() */
+  rctx->pvt_ctx->pivot_access_m.AssertHeld();
   rctx->reneg_mutex.Lock();
 
   if (rctx->state_mgr.get_state() == RenegState::READY) {
@@ -312,7 +313,7 @@ int rtp_init_round(rtp_ctx_t rctx) {
   rctx->reneg_mutex.Unlock();
 
   while (rctx->state_mgr.get_state() != RenegState::READY) {
-    pthread_cond_wait(&(pvt_ctx->pivot_update_cv), &(pvt_ctx->pivot_access_m));
+    pvt_ctx->pivot_update_cv->Wait();
   }
 
   return 0;
@@ -377,7 +378,7 @@ int rtp_handle_rtp_begin(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
 
   bool activated_now = false;
 
-  pthread_mutex_lock(&(rctx->pvt_ctx->pivot_access_m));
+  rctx->pvt_ctx->pivot_access_m.Lock();
   rctx->reneg_mutex.Lock();
 
   if (round_num < rctx->round_num) {
@@ -401,7 +402,7 @@ int rtp_handle_rtp_begin(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
   }
 
   rctx->reneg_mutex.Unlock();
-  pthread_mutex_unlock(&(rctx->pvt_ctx->pivot_access_m));
+  rctx->pvt_ctx->pivot_access_m.Unlock();
 
   if (activated_now) {
     /* Can reuse the same RTP_BEGIN buf. src_rank is anyway sent separately
@@ -425,7 +426,7 @@ int rtp_handle_rtp_begin(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
     const int stage_idx = 1;
     pivot_ctx* pvt_ctx = rctx->pvt_ctx;
 
-    pthread_mutex_lock(&(pvt_ctx->pivot_access_m));
+    pvt_ctx->pivot_access_m.Lock();
 
     int pvtcnt = rctx->pvtcnt[stage_idx];
 
@@ -438,7 +439,7 @@ int rtp_handle_rtp_begin(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
         pvt_buf, /* buf_sz */ 2048, rctx->round_num, stage_idx, rctx->my_rank,
         pvt_ctx->my_pivots, pvt_ctx->pivot_width, pvtcnt);
 
-    pthread_mutex_unlock(&(pvt_ctx->pivot_access_m));
+    pvt_ctx->pivot_access_m.Unlock();
 
     logf(LOG_DBG2, "pvt_calc_local @ R%d: bufsz: %d, bufhash: %u\n",
          pctx.my_rank, pvt_buf_len, ::hash_str(pvt_buf, pvt_buf_len));
@@ -635,7 +636,7 @@ int rtp_handle_pivot_bcast(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
   /* If next round has already started, replay its messages from buffers.
    * If not, mark self as READY, and wake up Main Thread
    */
-  pthread_mutex_lock(&(pvt_ctx->pivot_access_m));
+  pvt_ctx->pivot_access_m.Lock();
   rctx->reneg_mutex.Lock();
 
   perfstats_log_reneg(&(pctx.perf_ctx), pvt_ctx, rctx);
@@ -663,10 +664,10 @@ int rtp_handle_pivot_bcast(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
 
   if (!replay_rtp_begin_flag) {
     /* Since no round to replay, wake up Main Thread */
-    pthread_cond_signal(&(pvt_ctx->pivot_update_cv));
+    pvt_ctx->pivot_update_cv->Signal();
   }
 
-  pthread_mutex_unlock(&(pvt_ctx->pivot_access_m));
+  pvt_ctx->pivot_access_m.Unlock();
 
   if (replay_rtp_begin_flag) {
     /* Not supposed to access without lock, but logging statement so ok */
@@ -728,7 +729,7 @@ void send_to_all(int* peers, int num_peers, rtp_ctx_t rctx, char* buf,
 }
 
 int rtp_destroy(rtp_ctx_t rctx) {
-  pthread_mutex_destroy(&(rctx->reneg_mutex));
+  pivot_ctx_destroy(&(rctx->pvt_ctx));
 
   assert(rctx->data_buffer != nullptr);
   delete rctx->data_buffer;
@@ -772,4 +773,5 @@ void compute_aggregate_pivots(rtp_ctx_t rctx, int stage_num, int num_merged,
   merged_width = sample_width;
   std::copy(merged_pivot_vec.begin(), merged_pivot_vec.end(), merged_pivots);
 }
+
 }  // namespace pdlfs

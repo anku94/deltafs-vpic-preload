@@ -149,7 +149,10 @@ int pivot_ctx_init(pivot_ctx_t** pvt_ctx, reneg_opts* ro) {
   (*pvt_ctx) = new pivot_ctx_t();
   pivot_ctx_t* pvt_ctx_dref = *pvt_ctx;
 
-  pthread_mutex_lock(&(pvt_ctx_dref->pivot_access_m));
+  pvt_ctx_dref->pivot_update_cv =
+      new pdlfs::port::CondVar(&(pvt_ctx_dref->pivot_access_m));
+
+  pvt_ctx_dref->pivot_access_m.Lock();
 
   if (pctx.my_rank == 0) {
     logf(LOG_INFO, "pivot_ctx_init: oob_buf_sz: %d\n", ro->oob_buf_sz);
@@ -161,12 +164,12 @@ int pivot_ctx_init(pivot_ctx_t** pvt_ctx, reneg_opts* ro) {
   pvt_ctx_dref->rank_bin_count.resize(pctx.comm_sz);
   pvt_ctx_dref->rank_bin_count_aggr.resize(pctx.comm_sz);
 
-  pthread_mutex_unlock(&(pvt_ctx_dref->pivot_access_m));
+  pvt_ctx_dref->pivot_access_m.Unlock();
   return 0;
 }
 
 int pivot_ctx_reset(pivot_ctx_t* pvt_ctx) {
-  pthread_mutex_lock(&(pvt_ctx->pivot_access_m));
+  pvt_ctx->pivot_access_m.Lock();
 
   MainThreadState cur_state = pvt_ctx->mts_mgr.get_state();
   assert(cur_state != MainThreadState::MT_BLOCK);
@@ -180,7 +183,7 @@ int pivot_ctx_reset(pivot_ctx_t* pvt_ctx) {
 
   pvt_ctx->oob_buffer->Reset();
 
-  pthread_mutex_unlock(&(pvt_ctx->pivot_access_m));
+  pvt_ctx->pivot_access_m.Unlock();
   return 0;
 }
 
@@ -188,9 +191,11 @@ int pivot_ctx_destroy(pivot_ctx_t **pvt_ctx) {
   int rv = 0;
 
   assert(*pvt_ctx != nullptr);
+  assert((*pvt_ctx)->pivot_update_cv != nullptr);
   assert((*pvt_ctx)->oob_buffer != nullptr);
 
   delete((*pvt_ctx)->oob_buffer);
+  delete((*pvt_ctx)->pivot_update_cv);
   delete *pvt_ctx;
 
   *pvt_ctx = nullptr;
@@ -281,6 +286,7 @@ int pivot_calculate_from_oobl(pivot_ctx_t* pvt_ctx, int num_pivots) {
  * */
 int pivot_calculate_from_all(pivot_ctx_t* pvt_ctx, const size_t num_pivots) {
   // XXX: assert(pivot_access_m) held
+  pvt_ctx->pivot_access_m.AssertHeld();
 
   assert(num_pivots <= pdlfs::kMaxPivots);
 

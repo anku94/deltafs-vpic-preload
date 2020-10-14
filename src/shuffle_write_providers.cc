@@ -307,7 +307,7 @@ int shuffle_write_range(shuffle_ctx_t* ctx, const char* fname,
                                ctx->extra_data_len);
   p.indexed_prop = indexed_prop;
 
-  pthread_mutex_lock(&(pvt_ctx->pivot_access_m));
+  pvt_ctx->pivot_access_m.Lock();
 
   pvt_ctx->last_reneg_counter++;
 
@@ -382,7 +382,7 @@ int shuffle_write_range(shuffle_ctx_t* ctx, const char* fname,
   pvt_ctx->rank_bin_count_aggr[peer_rank]++;
 
 cleanup:
-  pthread_mutex_unlock(&(pvt_ctx->pivot_access_m));
+  pvt_ctx->pivot_access_m.Unlock();
 
   /* Release lock before shuffling, to avoid deadlocks from backpressure */
   if (!shuffle_now) {

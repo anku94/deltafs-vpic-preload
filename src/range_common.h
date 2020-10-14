@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "oob_buffer.h"
+#include "pdlfs-common/mutexlock.h"
 #include "range_constants.h"
 
 struct reneg_opts {
@@ -65,8 +66,8 @@ class MainThreadStateMgr {
 typedef struct pivot_ctx {
   /* The whole structure, except for the snapshot, is protected by
    * this mutex */
-  pthread_mutex_t pivot_access_m = PTHREAD_MUTEX_INITIALIZER;
-  pthread_cond_t pivot_update_cv = PTHREAD_COND_INITIALIZER;
+  pdlfs::port::Mutex pivot_access_m;
+  pdlfs::port::CondVar* pivot_update_cv = nullptr;
 
   MainThreadStateMgr mts_mgr;
 
