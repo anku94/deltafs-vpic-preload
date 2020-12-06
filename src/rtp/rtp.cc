@@ -237,57 +237,36 @@ int rtp_topology_init(rtp_ctx_t rctx) {
     return -1;
   }
 
-  int grank, gsz;
+  int grank, nodeid, nnodes, gsz, *local2global, *rank2node, *node2rep;
   grank = nexus_global_rank(rctx->nxp);
+  nodeid = nexus_nodeid(rctx->nxp);
+  nnodes = nexus_total_nodes(rctx->nxp);
   gsz = nexus_global_size(rctx->nxp);
+  local2global = nexus_local2global(rctx->nxp);
+  rank2node = nexus_rank2node(rctx->nxp);
+  node2rep = nexus_node2rep(rctx->nxp);
 
   compute_fanout_better(gsz, rctx->fanout);
 
-  /* Init peers for each stage */
-  int s1mask = ~(rctx->fanout[1] - 1);
-  int s2mask = ~(rctx->fanout[1] * rctx->fanout[2] - 1);
-  int s3mask = ~((rctx->fanout[1] * rctx->fanout[2] * rctx->fanout[3]) - 1);
-
-  int s1root = grank & s1mask;
-  rctx->root[1] = s1root;
-  rctx->num_peers[1] = 0;
+  rctx->root[1] = local2global[0];
+  rctx->num_peers[1] = nexus_local_size(rctx->nxp);
 
   for (int pidx = 0; pidx < rctx->fanout[1]; pidx++) {
-    int jump = 1;
-    int peer = s1root + pidx * jump;
-
-    if (peer >= gsz) break;
-
-    rctx->peers[1][pidx] = peer;
-    rctx->num_peers[1]++;
+    rctx->peers[1][pidx] = local2global[pidx];
   }
 
-  int s2root = grank & s2mask;
-  rctx->root[2] = s2root;
-  rctx->num_peers[2] = 0;
+  rctx->root[2] = node2rep[nodeid];
+  rctx->num_peers[2] = rctx->fanout[2];
 
   for (int pidx = 0; pidx < rctx->fanout[2]; pidx++) {
-    int jump = rctx->fanout[1];
-    int peer = s2root + pidx * jump;
-
-    if (peer >= gsz) break;
-
-    rctx->peers[2][pidx] = peer;
-    rctx->num_peers[2]++;
+    rctx->peers[2][pidx] = node2rep[(nodeid + pidx) % nnodes];
   }
 
-  int s3root = grank & s3mask;
-  rctx->root[3] = s3root;
-  rctx->num_peers[3] = 0;
+  rctx->root[3] = rctx->root[2];
+  rctx->num_peers[3] = rctx->fanout[3];
 
-  for (int pidx = 0; pidx < rctx->fanout[3]; pidx++) {
-    int jump = rctx->fanout[1] * rctx->fanout[2];
-    int peer = s3root + pidx * jump;
-
-    if (peer >= gsz) break;
-
-    rctx->peers[3][pidx] = peer;
-    rctx->num_peers[3]++;
+  for (int pidx = 0, jump = rctx->fanout[2]; pidx < rctx->fanout[3]; pidx++) {
+    rctx->peers[3][pidx] = node2rep[(nodeid + pidx * jump) % nnodes];
   }
 
   rctx->my_rank = grank;
@@ -682,6 +661,8 @@ int rtp_handle_pivot_bcast(rtp_ctx_t rctx, char* buf, unsigned int buf_sz,
 
 void broadcast_rtp_begin(rtp_ctx_t rctx) {
   /* XXX: ASSERT reneg_mutex is held */
+  rctx->reneg_mutex.AssertHeld();
+
   logf(LOG_DBUG, "broadcast_rtp_begin: at rank %d, to %d\n", rctx->my_rank,
        rctx->root[3]);
 
@@ -693,6 +674,8 @@ void broadcast_rtp_begin(rtp_ctx_t rctx) {
 
 void replay_rtp_begin(rtp_ctx_t rctx) {
   /* XXX: ASSERT reneg_mutex is held */
+  rctx->reneg_mutex.AssertHeld();
+
   logf(LOG_DBUG, "replay_rtp_begin: at rank %d\n", rctx->my_rank);
 
   char buf[256];
