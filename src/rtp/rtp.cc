@@ -237,37 +237,41 @@ int rtp_topology_init(rtp_ctx_t rctx) {
     return -1;
   }
 
-  int grank, nodeid, nnodes, gsz;
+  int lrank, grank, nodeid, nnodes, lsize, gsize;
+  lrank = nexus_local_rank(rctx->nxp);
   grank = nexus_global_rank(rctx->nxp);
   nodeid = nexus_node_id(rctx->nxp);
   nnodes = nexus_total_nodes(rctx->nxp);
-  gsz = nexus_global_size(rctx->nxp);
+  lsize = nexus_local_size(rctx->nxp);
+  gsize = nexus_global_size(rctx->nxp);
 
-  compute_fanout_better(gsz, rctx->fanout);
+  compute_fanout_better(gsize, rctx->fanout);
 
   rctx->root[1] = nexus_local2global(rctx->nxp, 0);
-  rctx->num_peers[1] = nexus_local_size(rctx->nxp);
+  rctx->num_peers[1] = rctx->fanout[1];
 
-  for (int pidx = 0; pidx < rctx->fanout[1]; pidx++) {
-    rctx->peers[1][pidx] = nexus_local2global(rctx->nxp, pidx);
+  for (int pidx = 0, l_offset = (lrank / rctx->fanout[1]) * rctx->fanout[1];
+       pidx < rctx->fanout[1]; pidx++) {
+    rctx->peers[1][pidx] = nexus_local2global(rctx->nxp, l_offset + pidx);
   }
 
   rctx->root[2] = nexus_node2rep(rctx->nxp, nodeid);
   rctx->num_peers[2] = rctx->fanout[2];
 
-  for (int pidx = 0; pidx < rctx->fanout[2]; pidx++) {
-    rctx->peers[2][pidx] = nexus_node2rep(rctx->nxp, (nodeid + pidx) % nnodes);
+  for (int pidx = 0, jump = rctx->fanout[1]; pidx < rctx->fanout[2]; pidx++) {
+    rctx->peers[2][pidx] = nexus_local2global(rctx->nxp, jump * pidx);
   }
 
   rctx->root[3] = rctx->root[2];
   rctx->num_peers[3] = rctx->fanout[3];
 
-  for (int pidx = 0, jump = rctx->fanout[2]; pidx < rctx->fanout[3]; pidx++) {
-    rctx->peers[3][pidx] = nexus_node2rep(rctx->nxp, (nodeid + pidx * jump) % nnodes);
+  for (int pidx = 0, jump = rctx->fanout[1] * rctx->fanout[2];
+       pidx < rctx->fanout[3]; pidx++) {
+    rctx->peers[3][pidx] = nexus_local2global(rctx->nxp, jump * pidx);
   }
 
   rctx->my_rank = grank;
-  rctx->num_ranks = gsz;
+  rctx->num_ranks = gsize;
 
   return 0;
 }
